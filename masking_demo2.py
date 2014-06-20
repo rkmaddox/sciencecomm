@@ -9,6 +9,9 @@ import pyglet
 import numpy as np
 from pyglet.window import key
 
+control_target = False
+base_vol = 0.1
+
 
 #==============================================================================
 # Make this a classy party
@@ -17,14 +20,14 @@ class Maskers(object):
     def __init__(self, files=['maskers/NW_F_C.wav',
                               'maskers/NW_F_S.wav',
                               'maskers/NW_M_C.wav',
-                              'maskers/NW_M_S.wav']):
+                              'maskers/NW_M_S.wav'], base_vol=0.01):
         self.files = files
         self.sources = [pyglet.media.load(f, streaming=False)
                         for f in self.files]
         self.duration = np.max([s.duration for s in self.sources])
         self.players = [pyglet.media.Player()
                         for _ in range(len(self.files))]
-        self.mask_vol = 1.0
+        self.mask_vol = base_vol
         self.location = 0
         self.gender = 0
         self.set_vols()
@@ -50,26 +53,42 @@ class Maskers(object):
         self.location = location
         self.set_vols()
 
+    def set_mask_vol(self, vol):
+        self.mask_vol = vol
+        self.set_vols()
+
     def set_vols(self):
         self.play_ind = 2*self.gender + self.location
         self.vols = [0 for _ in range(len(self.files))]
         self.vols[self.play_ind] = self.mask_vol
         for p, v in zip(self.players, self.vols):
             p.volume = v
-        print([int(v > 0) for v in [p.volume for p in self.players]])
+        #print([int(v > 0) for v in [p.volume for p in self.players]])
+        print([v for v in [p.volume for p in self.players]])
+
+    def get_volume(self):
+        return self.mask_vol
+
+    def get_volume_db(self):
+        return 20 * np.log10(self.get_volume())
+
+    def set_volume(self, vol):
+        self.mask_vol = vol
+        self.set_vols()
 
 
 class Target(object):
     def __init__(self, screen, file_name='targets/kix.mpeg',
-                 max_vol=1.9952623149688795):
+                 max_vol=1.9952623149688795, show_label=True, base_vol=0.01):
         self._screen = screen
         self.file = file_name
         self.source = pyglet.media.load(self.file, streaming=True)
         self.player = pyglet.media.Player()
         self.duration = self.source.duration
-        self.player.volume = 1.
+        self.player.volume = base_vol
         self.max_vol = max_vol
         self.show = False
+        self.show_label = show_label
 
     def loop(self, dt=None):
         self.player.eos_action = 'loop'
@@ -112,7 +131,8 @@ class Target(object):
     def draw(self):
         if self.show:
             self.player.get_texture().blit(screen.width / 2, screen.height / 2)
-        self.label.draw()
+        if self.show_label:
+            self.label.draw()
 
 
 #==============================================================================
@@ -129,8 +149,8 @@ keys = key.KeyStateHandler()
 window.push_handlers(keys)
 
 # Get the party started
-maskers = Maskers()
-target = Target(screen)
+maskers = Maskers(base_vol=base_vol)
+target = Target(screen, show_label=False, base_vol=base_vol)
 
 # Set some parameters
 vol_inc = 10. ** (1./20)
@@ -140,7 +160,7 @@ key_gender = key._3
 
 
 #==============================================================================
-# Begin callback functrions
+# Begin callback functions
 #==============================================================================
 @window.event
 def on_key_press(symbol, modifiers):
@@ -151,9 +171,15 @@ def on_key_press(symbol, modifiers):
     elif symbol == key_vis:
         target.show = True
     elif symbol == key.UP:
-        target.set_volume(target.get_volume() * vol_inc)
+        if control_target:
+            target.set_volume(target.get_volume() * vol_inc)
+        else:
+            maskers.set_volume(maskers.get_volume() * vol_inc)
     elif symbol == key.DOWN:
-        target.set_volume(target.get_volume() / vol_inc)
+        if control_target:
+            target.set_volume(target.get_volume() / vol_inc)
+        else:
+            maskers.set_volume(maskers.get_volume() / vol_inc)
     elif symbol == key.ESCAPE:
         target.stop()
         maskers.stop()
