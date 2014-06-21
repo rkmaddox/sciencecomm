@@ -59,5 +59,7 @@ def on_draw():
     glVertex2f(x + joystick.hat_x * 50, y + joystick.hat_y * 50)
     glEnd()
 
+    print(joystick.x)
+
 pyglet.clock.schedule(lambda dt: None)
 pyglet.app.run()
