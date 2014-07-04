@@ -117,7 +117,8 @@ joystick.init()
 def get_sound_ind():
     pygame.event.pump()
     if not joystick.get_button(0):
-        ind = int(np.round(joystick.get_axis(0) * (n_delay - 1)))
+        axis = (joystick.get_axis(0) + joystick.get_axis(1)) / 2.
+        ind = int(np.round(axis * (n_delay - 1)))
         itd = ind * itd_max / (n_delay - 1)
     else:
         ind = itd = 0
@@ -138,7 +139,7 @@ with ExperimentController('ITD', stim_rms=base_vol,
         else:
             color = [oc, oc, 1]
         ec.screen_text(info_string % itd,
-                       font_name='Arial', font_size=50, color=color)
+                       font_name='Courier', font_size=40, color=color)
         ec.flip()
         y = np.concatenate((x[0][np.newaxis, :],
                             x[ind][np.newaxis, :]), 0)
