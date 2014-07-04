@@ -11,29 +11,35 @@ import numpy as np
 from pyglet.window import key
 import scipy.signal as sig
 import matplotlib.pyplot as plt
+plt.ion()
 from expyfun import stimuli as stim
 import pyfftw.interfaces.numpy_fft as fft
 from expyfun import ExperimentController
 
-base_vol = 0.3
-isi = 0.5  # half period (seconds)
+base_vol = 0.01
+isi = 0.33  # half period (seconds)
 
 # Set up the left an right sounds to play
-sound_files = ['left.wav', 'right.wav']
+sound_files = None  # ['left.wav', 'right.wav']
 if sound_files is None:
     fs = 44100
     fc = 2e3
     sound_len = int(np.round(isi * 0.8 * fs))
-    sounds = np.random.randn(2, sound_len)
-    b, a = sig.butter(2, fc / (fs / 2))
-    sounds = sig.lfilter(b, a, sounds)
-    sounds *= base_vol / np.sqrt(np.mean(sounds ** 2, axis=-1, keepdims=True))
-    sounds[0] *= 0.5 * (1 - np.cos(2 * np.pi * 5 / (isi * 0.8) *
-                                   np.arange(sounds.shape[-1]) / fs))
-    sounds[1] *= 0.5 * (1 - np.cos(2 * np.pi * 6 / (isi * 0.8) *
-                                   np.arange(sounds.shape[-1]) / fs))
+    sound_dur = float(sound_len) / fs
+#    sounds = stim.window_edges(np.random.randn(1, sound_len), fs,
+#                               sound_dur / 2.5)
+#    b, a = sig.butter(2, fc / (fs / 2))
+#    sounds = sig.lfilter(b, a, sounds)
+    t = np.arange(sound_len, dtype=float) / fs
+    sounds = np.zeros(sound_len)
+    f0 = 200
+    for f in range(f0, 1301, f0):
+        sounds += np.sin(2 * np.pi * t * f)
+    sounds *= base_vol / stim.rms(sounds, keepdims=True)
+    sounds *= np.exp(-t / sound_dur * 4)
+    sounds = stim.window_edges(sounds, fs, 0.01)
 else:
-    assert(len(sound_files) == 2)
+    assert(len(sound_files) == 1)
     temp = []
     for wav in sound_files:
         temp += [stim.read_wav(wav)[0]]
@@ -82,16 +88,15 @@ def delay(x, time, fs, axis=-1, keeplength=False, pad=1):
     return x
 
 lr = 'LR'
-n_delay = 512 / 2
+n_delay = 1024 / 2
 itds = np.exp(np.linspace(np.log(1e-6), np.log(750e-6), n_delay))
 itd_max = 1000e-6
 itds = np.linspace(0, itd_max, n_delay)
-x = np.zeros((2, n_delay, sound_len))
+x = np.zeros((n_delay, sound_len))
 
 for ii, itd in enumerate(itds):
     print(int(np.round(itd * 1e6)))
-    for si in range(2):
-        x[si, ii] = delay(sounds[si], itd, fs, keeplength=True)
+    x[ii] = delay(sounds, itd, fs, keeplength=True)
 
 
 info_string = \
@@ -111,29 +116,36 @@ joystick.init()
 
 def get_sound_ind():
     pygame.event.pump()
-    ind = int(np.round(joystick.get_axis(0) * (n_delay - 1)))
-    itd = ind * itd_max / (n_delay - 1)
+    if not joystick.get_button(0):
+        ind = int(np.round(joystick.get_axis(0) * (n_delay - 1)))
+        itd = ind * itd_max / (n_delay - 1)
+    else:
+        ind = itd = 0
     return (itd, np.abs(ind))
     
 
 with ExperimentController('ITD', stim_rms=base_vol,
                           output_dir=None, check_rms=None, participant='PSC',
                           session='', verbose=0) as ec:
+    t0 = -np.inf
     while(1):
-        for si in range(2):
-            ec.check_force_quit()
-            itd, ind = get_sound_ind()
-            sign = np.sign(itd)
-            ec.screen_text(info_string % itd,
-                           font_name='Courier', font_size=30)
-            ec.flip()
-            y = np.concatenate((x[si, 0][np.newaxis, :],
-                                x[si, ind][np.newaxis, :]), 0)
-            if np.sign(itd) < 0:
-                y = y[::-1]
-            if si == 1:
-                y = y[::-1]
-            ec.load_buffer(y)
-            ec.play()
-            ec.wait_secs(isi)
-            ec.stop()
+        ec.check_force_quit()
+        itd, ind = get_sound_ind()
+        sign = np.sign(itd)
+        oc = 1 - np.abs(itd / itds[-1])
+        if np.sign(itd) > 0:
+            color = [1, oc, oc]
+        else:
+            color = [oc, oc, 1]
+        ec.screen_text(info_string % itd,
+                       font_name='Arial', font_size=50, color=color)
+        ec.flip()
+        y = np.concatenate((x[0][np.newaxis, :],
+                            x[ind][np.newaxis, :]), 0)
+        if np.sign(itd) > 0:
+            y = y[::-1]
+        ec.load_buffer(y)
+        ec.wait_until(t0 + isi)
+        t0 = ec.play()
+        ec.wait_secs(sound_dur + .01)
+        ec.stop()
