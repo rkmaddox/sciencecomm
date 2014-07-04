@@ -6,6 +6,7 @@ Created on Wed Jun 18 19:13:37 2014
 """
 
 import pyglet
+import pygame
 import numpy as np
 from pyglet.window import key
 import scipy.signal as sig
@@ -14,11 +15,11 @@ from expyfun import stimuli as stim
 import pyfftw.interfaces.numpy_fft as fft
 from expyfun import ExperimentController
 
-base_vol = 0.1
-isi = 0.8  # half period (seconds)
+base_vol = 0.3
+isi = 0.5  # half period (seconds)
 
 # Set up the left an right sounds to play
-sound_files = None
+sound_files = ['left.wav', 'right.wav']
 if sound_files is None:
     fs = 44100
     fc = 2e3
@@ -32,7 +33,19 @@ if sound_files is None:
     sounds[1] *= 0.5 * (1 - np.cos(2 * np.pi * 6 / (isi * 0.8) *
                                    np.arange(sounds.shape[-1]) / fs))
 else:
-    pass  # load the sounds from wave files and fix their RMS
+    assert(len(sound_files) == 2)
+    temp = []
+    for wav in sound_files:
+        temp += [stim.read_wav(wav)[0]]
+    fs = stim.read_wav(sound_files[0])[1]
+    lens = [w.shape[1] for w in temp]
+    sounds = np.zeros((2, np.max(lens)))
+    for si, l in enumerate(lens):
+        sounds[si, :l] = temp[si]
+    sounds = sig.resample(sounds, 44100 * sounds.shape[1] / fs, axis=1)
+    fs = 44100
+    sound_len = sounds.shape[1]
+
 
 
 # Make the ITD function
@@ -69,9 +82,10 @@ def delay(x, time, fs, axis=-1, keeplength=False, pad=1):
     return x
 
 lr = 'LR'
-n_delay = 16 / 2
+n_delay = 512 / 2
 itds = np.exp(np.linspace(np.log(1e-6), np.log(750e-6), n_delay))
-itds = np.linspace(0, 750e-6, n_delay)
+itd_max = 1000e-6
+itds = np.linspace(0, itd_max, n_delay)
 x = np.zeros((2, n_delay, sound_len))
 
 for ii, itd in enumerate(itds):
@@ -79,32 +93,45 @@ for ii, itd in enumerate(itds):
     for si in range(2):
         x[si, ii] = delay(sounds[si], itd, fs, keeplength=True)
 
-info_string = [
+
+info_string = \
     '''
-   Breath:  5 seconds\n
-Heartbeat:  0.8 seconds\n
-    Blink:  0.2 seconds\n
-      ITD: -%1.6f seconds
-    ''',
-    '''
-   Breath:  5 seconds\n
-Heartbeat:  0.8 seconds\n
-    Blink:  0.2 seconds\n
-      ITD:   %1.6f seconds
-    ''']
+<pre>   Breath:  5 seconds
+Heartbeat:  0.8 seconds
+    Blink:  0.2 seconds
+      ITD: %+1.6f seconds
+      '''
+info_string = '<pre>Interaural Time Difference: %+1.6f seconds'
+
+pygame.init()
+pygame.joystick.init()
+joystick = pygame.joystick.Joystick(0)
+joystick.init()
+
+
+def get_sound_ind():
+    pygame.event.pump()
+    ind = int(np.round(joystick.get_axis(0) * (n_delay - 1)))
+    itd = ind * itd_max / (n_delay - 1)
+    return (itd, np.abs(ind))
+    
+
 with ExperimentController('ITD', stim_rms=base_vol,
                           output_dir=None, check_rms=None, participant='PSC',
                           session='', verbose=0) as ec:
-    for ii, itd in enumerate(itds):
+    while(1):
         for si in range(2):
-            itd *= -1
+            ec.check_force_quit()
+            itd, ind = get_sound_ind()
             sign = np.sign(itd)
-            ec.screen_text(info_string[sign > 0] % (np.abs(itd)),
-                           font_name='Courier')
+            ec.screen_text(info_string % itd,
+                           font_name='Courier', font_size=30)
             ec.flip()
             y = np.concatenate((x[si, 0][np.newaxis, :],
-                                x[si, ii][np.newaxis, :]), 0)
-            if np.sign(itd) > 0:
+                                x[si, ind][np.newaxis, :]), 0)
+            if np.sign(itd) < 0:
+                y = y[::-1]
+            if si == 1:
                 y = y[::-1]
             ec.load_buffer(y)
             ec.play()
